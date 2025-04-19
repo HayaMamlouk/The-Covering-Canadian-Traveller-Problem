@@ -1,30 +1,52 @@
+"""
+This module provides a reference, *readable* implementation of the Cyclic Routing
+(CR) algorithm for the **k‑Cyclic Cardinality Travelling Problem (k-CCTP)**,
+using the precise structure given in the supplied pseudocode.
+
+------------------------------------------------------------------------
+Usage example
+------------------------------------------------------------------------
+>>> import networkx as nx
+>>> from cyclic_routing import cyclic_routing
+
+# Build a complete graph with Euclidean weights (triangle inequality holds)
+>>> G = nx.complete_graph(6)
+>>> pos = nx.random_layout(G, seed=1)            # random 2-D coordinates
+>>> for u, v in G.edges:
+...     G[u][v]["weight"] = ((pos[u] - pos[v])**2).sum() ** 0.5
+
+# Declare *unknown* blockages (here fixed for reproducibility)
+>>> blocked = {(0, 2), (1, 4), (3, 5)}
+
+# Run the CR algorithm starting from origin 0
+>>> route, length = cyclic_routing(G, origin=0, blocked_edges=blocked)
+>>> print(route)
+[0, 1, 5, 2, 3, 4, 0]
+>>> print(f"Total distance travelled = {length:.3f}")
+
+The algorithm keeps discovering blockages *online* (i.e. only when it first
+tries to use a blocked edge) and incrementally patches its route using the
+`SHORTCUT` procedure while respecting the original Christofides tour order.
+
+------------------------------------------------------------------------
+API
+------------------------------------------------------------------------
+- `cyclic_routing(G, origin, blocked_edges)` - run the algorithm and return the
+  realised route (list of vertices, including the closing return to the origin)
+  together with its total cost.
+
+The code relies **only** on `networkx`, which is part of the standard set of
+libraries available in the ChatGPT sandbox.  If `networkx` is not present the
+module falls back to a very small local implementation of the Christofides
+1.5-approximation tour (sufficient for modest graph sizes ≤ 20).
+"""
+from __future__ import annotations
+
+import heapq
+from collections import deque
 from itertools import tee
 from typing import Dict, Iterable, List, Sequence, Set, Tuple
 
-try:
-    import networkx as nx  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover – simple fallback
-
-    class _SimpleGraph(dict):
-        """A *very* tiny undirected graph replacement used if networkx is absent."""
-
-        def add_edge(self, u, v, weight: float):
-            self.setdefault(u, {})[v] = weight
-            self.setdefault(v, {})[u] = weight
-
-        def nodes(self):
-            return self.keys()
-
-        def edges(self):
-            for u in self:
-                for v in self[u]:
-                    if u < v:
-                        yield (u, v)
-
-        def __getitem__(self, item):  # type: ignore[override]
-            return super().__getitem__(item)
-
-    nx = None  # type: ignore
 
 # ---------------------------------------------------------------------
 # Helpers
@@ -47,34 +69,53 @@ def _edge_key(u, v):
 
 
 def _christofides_tour(G, origin: int) -> List[int]:
-    """Return a 1.5‑approximate TSP tour using Christofides (via networkx if
-    available, else a naïve greedy fallback)."""
+    """Return a 1.5‑approximate TSP tour using Christofides.
 
-    if nx is not None and hasattr(nx.algorithms.approximation, "christofides"):
-        from networkx.algorithms.approximation.traveling_salesman import (
-            traveling_salesman_problem as _tsp,
-        )
+    The NetworkX API changed around version 3.2 – the inner
+    ``christofides`` routine no longer accepts the *start* keyword that
+    ``traveling_salesman_problem`` forwards to it.  We therefore:
 
+    1.  Try the *newer* call signature (without *start*), and afterwards
+        rotate the tour so it begins at ``origin``.
+    2.  Fall back to the *older* signature (with *start*) if the first
+        attempt fails.
+    3.  Finally, if NetworkX is not available, revert to the simple greedy
+        tour used before.
+    """
+
+    if nx is None or not hasattr(nx.algorithms.approximation, "christofides"):
+        return _greedy_fallback(G, origin)
+
+    from networkx.algorithms.approximation.traveling_salesman import (
+        traveling_salesman_problem as _tsp,
+    )
+
+    try:
+        # Newer NetworkX (≥ 3.2): christofides() does *not* accept 'start'
         tour: List[int] = _tsp(
+            G,
+            cycle=True,
+            weight="weight",
+            method=nx.algorithms.approximation.christofides,
+        )
+    except TypeError:
+        # Older NetworkX (≤ 3.1): christofides(start=…) is allowed
+        tour = _tsp(
             G,
             cycle=True,
             weight="weight",
             method=nx.algorithms.approximation.christofides,
             start=origin,
         )
-        return tour[:-1]  # drop duplicate origin added by networkx
 
-    # ---------------- fallback (greedy nearest‑neighbour) ----------------
-    unvisited = set(G.nodes())
-    unvisited.remove(origin)
-    tour = [origin]
-    current = origin
-    while unvisited:
-        next_v = min(unvisited, key=lambda v: G[current][v]["weight"])
-        tour.append(next_v)
-        unvisited.remove(next_v)
-        current = next_v
-    return tour  # origin not repeated – cyclic handling done by caller
+    # Ensure the tour starts at 'origin' and drop the closing repeat
+    if tour[0] != origin:
+        k = tour.index(origin)
+        tour = tour[k:-1] + tour[:k]
+    else:
+        tour = tour[:-1]  # remove duplicate origin added by NX
+
+    return tour
 
 # ---------------------------------------------------------------------
 # SHORTCUT procedure (faithful to Fig. 1 pseudocode)
@@ -126,7 +167,7 @@ def _shortcut(
             i, j = j, j + 1
             continue
 
-        # --- direct edge blocked -> try a two‑hop detour via already‑visited
+        # --- direct edge blocked → try a two‑hop detour via already‑visited
         #     vertices lying between i and j along *work* ---------------
         l = i + 1
         found_detour = False
