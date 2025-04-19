@@ -1,10 +1,3 @@
-# cnn_routing.py
-# ------------------------------------------------------------
-# Implementation of the *Christofides' Nearest‑Neighbor* (CNN)
-# algorithm described in the user‑supplied pseudocode.
-# ------------------------------------------------------------
-# Author: ChatGPT (OpenAI o3)
-# ------------------------------------------------------------
 """
 CNN *compress‑and‑explore* algorithm
 ===================================
