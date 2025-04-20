@@ -1,6 +1,13 @@
+# cyclic_routing.py
+# ------------------------------------------------------------
+# Implementation of the Cyclic Routing (CR) algorithm described
+# in the user‑supplied pseudocode (Algorithm 1 and Procedure SHORTCUT).
+# ------------------------------------------------------------
+# Author: ChatGPT (OpenAI o3)
+# ------------------------------------------------------------
 """
 This module provides a reference, *readable* implementation of the Cyclic Routing
-(CR) algorithm for the **k‑Cyclic Cardinality Travelling Problem (k-CCTP)**,
+(CR) algorithm for the **k‑Cyclic Cardinality Travelling Problem (k‑CCTP)**,
 using the precise structure given in the supplied pseudocode.
 
 ------------------------------------------------------------------------
@@ -11,7 +18,7 @@ Usage example
 
 # Build a complete graph with Euclidean weights (triangle inequality holds)
 >>> G = nx.complete_graph(6)
->>> pos = nx.random_layout(G, seed=1)            # random 2-D coordinates
+>>> pos = nx.random_layout(G, seed=1)            # random 2‑D coordinates
 >>> for u, v in G.edges:
 ...     G[u][v]["weight"] = ((pos[u] - pos[v])**2).sum() ** 0.5
 
@@ -22,7 +29,7 @@ Usage example
 >>> route, length = cyclic_routing(G, origin=0, blocked_edges=blocked)
 >>> print(route)
 [0, 1, 5, 2, 3, 4, 0]
->>> print(f"Total distance travelled = {length:.3f}")
+>>> print(f"Total distance travelled = {length:.3f}")
 
 The algorithm keeps discovering blockages *online* (i.e. only when it first
 tries to use a blocked edge) and incrementally patches its route using the
@@ -31,14 +38,14 @@ tries to use a blocked edge) and incrementally patches its route using the
 ------------------------------------------------------------------------
 API
 ------------------------------------------------------------------------
-- `cyclic_routing(G, origin, blocked_edges)` - run the algorithm and return the
+- `cyclic_routing(G, origin, blocked_edges)` – run the algorithm and return the
   realised route (list of vertices, including the closing return to the origin)
   together with its total cost.
 
 The code relies **only** on `networkx`, which is part of the standard set of
 libraries available in the ChatGPT sandbox.  If `networkx` is not present the
 module falls back to a very small local implementation of the Christofides
-1.5-approximation tour (sufficient for modest graph sizes ≤ 20).
+1.5‑approximation tour (sufficient for modest graph sizes ≤ 20).
 """
 from __future__ import annotations
 
@@ -47,6 +54,30 @@ from collections import deque
 from itertools import tee
 from typing import Dict, Iterable, List, Sequence, Set, Tuple
 
+try:
+    import networkx as nx  # type: ignore
+except ModuleNotFoundError:  # pragma: no cover – simple fallback
+
+    class _SimpleGraph(dict):
+        """A *very* tiny undirected graph replacement used if networkx is absent."""
+
+        def add_edge(self, u, v, weight: float):
+            self.setdefault(u, {})[v] = weight
+            self.setdefault(v, {})[u] = weight
+
+        def nodes(self):
+            return self.keys()
+
+        def edges(self):
+            for u in self:
+                for v in self[u]:
+                    if u < v:
+                        yield (u, v)
+
+        def __getitem__(self, item):  # type: ignore[override]
+            return super().__getitem__(item)
+
+    nx = None  # type: ignore
 
 # ---------------------------------------------------------------------
 # Helpers

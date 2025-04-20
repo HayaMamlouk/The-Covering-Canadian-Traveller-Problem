@@ -1,0 +1,5 @@
+networkx>=3.0
+numpy     # utilisé indirectement
+matplotlib
+pandas
+tqdm       # barre de progression dans experiments.py

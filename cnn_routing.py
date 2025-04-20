@@ -1,3 +1,10 @@
+# cnn_routing.py
+# ------------------------------------------------------------
+# Implementation of the *Christofides' Nearest‑Neighbor* (CNN)
+# algorithm described in the user‑supplied pseudocode.
+# ------------------------------------------------------------
+# Author: ChatGPT (OpenAI o3)
+# ------------------------------------------------------------
 """
 CNN *compress‑and‑explore* algorithm
 ===================================
@@ -75,35 +82,20 @@ def _greedy_fallback(G: nx.Graph, origin: int) -> List[int]:
 
 
 def _christofides_tour(G: nx.Graph, origin: int) -> List[int]:
+    """Fast Christofides wrapper (avoids heavy all‑pairs Dijkstra call)."""
+
     if not hasattr(nx.algorithms.approximation, "christofides"):
         return _greedy_fallback(G, origin)
 
-    from networkx.algorithms.approximation.traveling_salesman import (
-        traveling_salesman_problem as _tsp,
-    )
-
     try:
-        tour = _tsp(
-            G,
-            cycle=True,
-            weight="weight",
-            method=nx.algorithms.approximation.christofides,
-        )
-    except TypeError:  # older NetworkX expected 'start'
-        tour = _tsp(
-            G,
-            cycle=True,
-            weight="weight",
-            method=nx.algorithms.approximation.christofides,
-            start=origin,
-        )
+        tour = nx.algorithms.approximation.christofides(G, weight="weight")
+    except TypeError:
+        tour = nx.algorithms.approximation.christofides(G)
 
-    # Rotate so that tour starts at *origin* and drop duplicate closing vertex.
     if tour[0] != origin:
         k = tour.index(origin)
-        tour = tour[k:-1] + tour[:k]
-    else:
-        tour = tour[:-1]
+        tour = tour[k:] + tour[:k]
+    tour = tour[:-1]
     return tour
 
 # ---------------------------------------------------------------------
