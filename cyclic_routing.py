@@ -1,368 +1,202 @@
-# cyclic_routing.py
-# ------------------------------------------------------------
-# Implementation of the Cyclic Routing (CR) algorithm described
-# in the user‑supplied pseudocode (Algorithm 1 and Procedure SHORTCUT).
-# ------------------------------------------------------------
-# Author: ChatGPT (OpenAI o3)
-# ------------------------------------------------------------
-"""
-This module provides a reference, *readable* implementation of the Cyclic Routing
-(CR) algorithm for the **k‑Cyclic Cardinality Travelling Problem (k‑CCTP)**,
-using the precise structure given in the supplied pseudocode.
+import networkx as nx
+from networkx.algorithms.approximation import traveling_salesman_problem
+from typing import Any, Iterable, List, Tuple
 
-------------------------------------------------------------------------
-Usage example
-------------------------------------------------------------------------
->>> import networkx as nx
->>> from cyclic_routing import cyclic_routing
+# ----------------------------------------------------------------------
+# Christofides Tour (approximation for TSP)
+# ----------------------------------------------------------------------
+def get_christofides_tour(G: nx.Graph, start_node: Any):
+    """
+    Compute a Christofides TSP tour on G, rotate to start at `start_node`,
+    and drop the final return to that node to get a simple cycle ordering.
+    """
+    cycle = traveling_salesman_problem(G, cycle=True, weight='weight')
+    if start_node in cycle:
+        idx = cycle.index(start_node)
+        cycle = cycle[idx:] + cycle[:idx]
+    return cycle[:-1]  # remove duplicated endpoint
 
-# Build a complete graph with Euclidean weights (triangle inequality holds)
->>> G = nx.complete_graph(6)
->>> pos = nx.random_layout(G, seed=1)            # random 2‑D coordinates
->>> for u, v in G.edges:
-...     G[u][v]["weight"] = ((pos[u] - pos[v])**2).sum() ** 0.5
-
-# Declare *unknown* blockages (here fixed for reproducibility)
->>> blocked = {(0, 2), (1, 4), (3, 5)}
-
-# Run the CR algorithm starting from origin 0
->>> route, length = cyclic_routing(G, origin=0, blocked_edges=blocked)
->>> print(route)
-[0, 1, 5, 2, 3, 4, 0]
->>> print(f"Total distance travelled = {length:.3f}")
-
-The algorithm keeps discovering blockages *online* (i.e. only when it first
-tries to use a blocked edge) and incrementally patches its route using the
-`SHORTCUT` procedure while respecting the original Christofides tour order.
-
-------------------------------------------------------------------------
-API
-------------------------------------------------------------------------
-- `cyclic_routing(G, origin, blocked_edges)` – run the algorithm and return the
-  realised route (list of vertices, including the closing return to the origin)
-  together with its total cost.
-
-The code relies **only** on `networkx`, which is part of the standard set of
-libraries available in the ChatGPT sandbox.  If `networkx` is not present the
-module falls back to a very small local implementation of the Christofides
-1.5‑approximation tour (sufficient for modest graph sizes ≤ 20).
-"""
-from __future__ import annotations
-
-import heapq
-from collections import deque
-from itertools import tee
-from typing import Dict, Iterable, List, Sequence, Set, Tuple
-
-try:
-    import networkx as nx  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover – simple fallback
-
-    class _SimpleGraph(dict):
-        """A *very* tiny undirected graph replacement used if networkx is absent."""
-
-        def add_edge(self, u, v, weight: float):
-            self.setdefault(u, {})[v] = weight
-            self.setdefault(v, {})[u] = weight
-
-        def nodes(self):
-            return self.keys()
-
-        def edges(self):
-            for u in self:
-                for v in self[u]:
-                    if u < v:
-                        yield (u, v)
-
-        def __getitem__(self, item):  # type: ignore[override]
-            return super().__getitem__(item)
-
-    nx = None  # type: ignore
-
-# ---------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------
-
-def _pairwise(iterable: Iterable):
-    """s -> (s0,s1), (s1,s2), (s2, s3), …"""
-    a, b = tee(iterable)
-    next(b, None)
-    return zip(a, b)
-
-
-def _edge_key(u, v):
-    """Return an unordered tuple so that (u, v) == (v, u)."""
-    return (u, v) if u <= v else (v, u)
-
-# ---------------------------------------------------------------------
-# Christofides tour (1.5‑approximation)
-# ---------------------------------------------------------------------
-
-
-def _christofides_tour(G, origin: int) -> List[int]:
-    """Return a 1.5‑approximate TSP tour using Christofides.
-
-    The NetworkX API changed around version 3.2 – the inner
-    ``christofides`` routine no longer accepts the *start* keyword that
-    ``traveling_salesman_problem`` forwards to it.  We therefore:
-
-    1.  Try the *newer* call signature (without *start*), and afterwards
-        rotate the tour so it begins at ``origin``.
-    2.  Fall back to the *older* signature (with *start*) if the first
-        attempt fails.
-    3.  Finally, if NetworkX is not available, revert to the simple greedy
-        tour used before.
+# ----------------------------------------------------------------------
+# Core CR Algorithm
+# ----------------------------------------------------------------------
+def cr_algorithm(G: nx.Graph, start_node, tour: List[Any],blocked: set[Tuple[Any, Any]]) -> List[Tuple[Any, Any]]:
+    """
+    Perform the Cyclic-Routing (CR) traversal on G using a fixed circular
+    `tour` and avoiding edges in `blocked`. Returns the sequence of directed
+    edges (u, v) that form the walk, finishing back at `start_node`.
     """
 
-    if nx is None or not hasattr(nx.algorithms.approximation, "christofides"):
-        return _greedy_fallback(G, origin)
+    def _sorted_edge(u: Any, v: Any) -> Tuple[Any, Any]: 
+        """Return a sorted tuple of the edge (u, v) to ensure undirectedness."""
+        return tuple(sorted((u, v)))
+    
+    def cw_between(a: Any, b: Any) -> List[Any]:
+        """Return nodes encountered moving CW from `a` to `b` (exclusive)."""
+        res = []
+        n = len(tour)
+        i = (tour.index(a) + 1) % n
+        # collect until we reach b
+        while tour[i] != b:
+            res.append(tour[i])
+            i = (i + 1) % n
+        return res
 
-    from networkx.algorithms.approximation.traveling_salesman import (
-        traveling_salesman_problem as _tsp,
-    )
+    def agenda_list(
+        cur: Any,
+        direction: int,
+        unvisited: set
+    ) -> List[Any]:
+        """
+        Create the list of unvisited nodes encountered by making one full lap
+        around the `tour`, starting immediately after `cur`, in the given
+        `direction` (1=CW, -1=CCW).
 
-    try:
-        # Newer NetworkX (≥ 3.2): christofides() does *not* accept 'start'
-        tour: List[int] = _tsp(
-            G,
-            cycle=True,
-            weight="weight",
-            method=nx.algorithms.approximation.christofides,
-        )
-    except TypeError:
-        # Older NetworkX (≤ 3.1): christofides(start=…) is allowed
-        tour = _tsp(
-            G,
-            cycle=True,
-            weight="weight",
-            method=nx.algorithms.approximation.christofides,
-            start=origin,
-        )
-
-    # Ensure the tour starts at 'origin' and drop the closing repeat
-    if tour[0] != origin:
-        k = tour.index(origin)
-        tour = tour[k:-1] + tour[:k]
-    else:
-        tour = tour[:-1]  # remove duplicate origin added by NX
-
-    return tour
-
-# ---------------------------------------------------------------------
-# SHORTCUT procedure (faithful to Fig. 1 pseudocode)
-# ---------------------------------------------------------------------
-
-
-def _shortcut(
-    P: Sequence[int],  # full Christofides tour order (no duplicate origin)
-    V_m: List[int],  # *ordered* list of unvisited vertices for this round
-    current: int,  # v_{m,0}
-    blocked_edges: Set[Tuple[int, int]],
-    route: List[int],  # global route being built (will be extended in place)
-) -> Tuple[List[int], int, bool]:
-    """Execute one call to *procedure SHORTCUT*.
-
-    Parameters
-    ----------
-    P : full Christofides tour visiting order (used for index look‑ups only)
-    V_m : list of unvisited vertices *in the same order as in P* (forward or
-           reverse).  This is mutated only through removals.
-    current : the vertex where the traveller currently stands (v_{m,0}).
-    blocked_edges : **global** set of blocked edges, *unknown* to the algorithm
-                    until an attempted traverse.
-    route : list storing the realised walk – gets extended in place.
-
-    Returns
-    -------
-    V_{m+1} : list of the vertices still unvisited after this shortcut.
-    last    : the traveller's final position after the procedure.
-    progress: ``True`` iff *some* vertex has been visited in this call.
-    """
-
-    def is_blocked(u, v) -> bool:
-        return _edge_key(u, v) in blocked_edges
-
-    # Build the working list *with* the current vertex as position 0
-    work = [current] + V_m.copy()
-    i, j = 0, 1
-
-    made_progress = False
-    while j < len(work):
-        v_i, v_j = work[i], work[j]
-        if not is_blocked(v_i, v_j):
-            # --- direct edge works ---
-            route.append(v_j)
-            if v_j in V_m:
-                V_m.remove(v_j)
-                made_progress = True
-            i, j = j, j + 1
-            continue
-
-        # --- direct edge blocked → try a two‑hop detour via already‑visited
-        #     vertices lying between i and j along *work* ---------------
-        l = i + 1
-        found_detour = False
-        while l < j:
-            v_l = work[l]
-            if (not is_blocked(v_i, v_l)) and (not is_blocked(v_l, v_j)):
-                # viable two‑edge path discovered
-                route.extend([v_l, v_j])
-                if v_j in V_m:
-                    V_m.remove(v_j)
-                    made_progress = True
-                i, j = j, j + 1
-                found_detour = True
+        Returns:
+            List of nodes (subset of unvisited) in the order they appear.
+        """
+        # choose traversal order
+        order = tour if direction == 1 else list(reversed(tour))
+        seq: List[Any] = []
+        n = len(order)
+        # start just after current node
+        start_idx = order.index(cur)
+        idx = (start_idx + 1) % n
+        first = order[idx]
+        # walk exactly one lap
+        while True:
+            node = order[idx]
+            # include if not visited yet
+            if node in unvisited:
+                seq.append(node)
+            idx = (idx + 1) % n
+            if order[idx] == first:
                 break
-            l += 1
-
-        if found_detour:
-            continue  # outer while – next j value already set
-
-        # --- give up on v_j for this round -----------------------------
-        j += 1  # skip j entirely
-
-    last_position = work[i]
-    return V_m, last_position, made_progress
-
-# ---------------------------------------------------------------------
-# Main CR algorithm (Algorithm 1)
-# ---------------------------------------------------------------------
-
-
-def cyclic_routing(
-    G,  # networkx.Graph with *metric* edge weights (triangle inequality)
-    origin: int,
-    blocked_edges: Set[Tuple[int, int]] | Iterable[Tuple[int, int]] = (),
-    *,
-    forward_first: bool = True,
-) -> Tuple[List[int], float]:
-    """Run the Cyclic Routing (CR) algorithm and return the realised route.
-
-    Parameters
-    ----------
-    G : *Complete* undirected graph whose edge **weights** satisfy the triangle
-        inequality.  The algorithm treats it as such.
-    origin : starting vertex ``s``.
-    blocked_edges : iterable with the *set* of blocked undirected edges.  These
-                    are *concealed* from the algorithm until it first attempts
-                    to traverse one of them.
-    forward_first : whether the very first round follows the forward order of
-                    the Christofides tour (default **True**).
-
-    Returns
-    -------
-    route : list of vertices representing the walk realised by the algorithm.
-            The list both starts and ends at *origin*.
-    length : total length of that walk (sum of edge weights actually used).
-    """
-
-    # ---------------- normalise inputs ---------------------------------
-    blocked_edges = {
-        _edge_key(u, v) for u, v in blocked_edges if u != v
-    }  # type: ignore[arg-type]
-
-    if nx is None:
-        raise RuntimeError("cyclic_routing requires networkx or a compatible graph object available as 'nx'.")
-
-    # ---------------- 0. initial Christofides tour ----------------------
-    P: List[int] = _christofides_tour(G, origin)
-
-    route: List[int] = [origin]  # final path being constructed (P^{cr})
-    current = origin
-
-    # For quick index look‑ups along the tour
-    index_in_P: Dict[int, int] = {v: i for i, v in enumerate(P)}
-    n = len(P)
-
-    def ordered_unvisited(unvisited: Set[int], start: int, forward: bool) -> List[int]:
-        """Return the subsequence of *P* containing *unvisited* vertices, starting
-        right *after* ``start`` (cyclic), in *forward* (True) or reverse order."""
-        seq = []
-        step = 1 if forward else -1
-        k = index_in_P[start]
-        for _ in range(n - 1):  # every vertex except *start*
-            k = (k + step) % n
-            v = P[k]
-            if v in unvisited:
-                seq.append(v)
         return seq
 
-    # -------------------------------------------------------------------
-    V_m: Set[int] = set(G.nodes()) - {origin}  # initially all except origin
-    m = 1
-    prev_direction_forward = forward_first  # direction taken in (m‑1)-th round
+    # --- Initialization ---
+    visited = {start_node}             # nodes we've reached
+    unvisited = set(G.nodes) - visited # nodes still to reach
+    cur = start_node                   # current node
+    direction = 1                      # traversal direction: 1=CW, -1=CCW
+    walk: List[Tuple[Any, Any]] = []   # edges of the CR walk
+    round_no = 1                       # iteration counter
 
-    while V_m:
-        # Build the *ordered* list of still unvisited vertices for this round
-        V_m_ordered = ordered_unvisited(V_m, current, prev_direction_forward)
+    # --- Main CR loop: visit all nodes ---
+    while unvisited :
+        # plan next candidates
+        todo = agenda_list(cur, direction, unvisited)
+        if not todo:
+            # no unvisited nodes reachable 
+            break
 
-        # -------------- try SHORTCUT in the chosen direction ------------
-        V_m_after, current_after, progressed = _shortcut(
-            P,
-            V_m_ordered,
-            current,
-            blocked_edges,
-            route,
-        )
+        expected_last = todo[-1]  # node we'd finish on if everything goes CW
+        progressed = False         # did we visit anyone this round?
 
-        # If no vertex was reached, immediately attempt opposite direction
-        if not progressed:
-            V_m_ordered_rev = ordered_unvisited(V_m, current, not prev_direction_forward)
-            V_m_after, current_after, _ = _shortcut(
-                P,
-                V_m_ordered_rev,
-                current,
-                blocked_edges,
-                route,
-            )
-            prev_direction_forward = not prev_direction_forward  # flipped
-        else:
-            # keep direction for next round *unless* no progress was made
-            prev_direction_forward = prev_direction_forward
+        # try each target in agenda
+        for tgt in todo:
+            edge = _sorted_edge(cur, tgt)
 
-        # Prepare next round --------------------------------------------
-        V_m = set(V_m_after)
-        current = current_after
-        m += 1
+            # --- Case 1: direct edge is free ---
+            if edge not in blocked:
+                walk.append((cur, tgt))
+                visited.add(tgt)
+                unvisited.remove(tgt)
+                cur = tgt
+                progressed = True
+                continue
 
-    # ---------------- 3. return to origin ------------------------------
-    def is_blocked(u, v):
-        return _edge_key(u, v) in blocked_edges
+            # --- Case 2: direct edge blocked ---
+            # mark blocked and attempt a two-hop detour via visited nodes
+            blocked.add(edge)
+            arc = (cw_between(cur, tgt) if direction == 1
+                   else list(reversed(cw_between(tgt, cur))))
+            for mid in arc:
+                if mid in visited:
+                    e1, e2 = _sorted_edge(cur, mid), _sorted_edge(mid, tgt)
+                    if e1 not in blocked and e2 not in blocked:
+                        # take detour cur->mid->tgt
+                        walk.extend([(cur, mid), (mid, tgt)])
+                        visited.add(tgt)
+                        unvisited.remove(tgt)
+                        cur = tgt
+                        progressed = True
+                        break
+            # if no detour found, skip tgt
 
-    # Simple strategy: try direct edge, else two‑hop via earliest visited *u*.
-    if not is_blocked(current, origin):
-        route.append(origin)
-    else:
-        for u in route:  # already‑visited vertices (order matters little)
-            if (not is_blocked(current, u)) and (not is_blocked(u, origin)):
-                route.extend([u, origin])
+            # stop early if all visited
+            if not unvisited:
                 break
-        else:
-            raise RuntimeError("No feasible path found back to the origin (all two‑hop detours blocked).")
 
-    # --------------- compute total length ------------------------------
-    total_length = 0.0
-    for u, v in _pairwise(route):
-        total_length += G[u][v]["weight"]
+        # if we progressed but didn't end on expected_last, flip direction
+        if progressed and cur != expected_last:
+            direction *= -1
+        # if no progress at all, abort
+        if not progressed:
+            break
 
-    return route, total_length
+        round_no += 1
+
+    # --- Return to start_node ---
+    final_edge = _sorted_edge(cur, start_node)
+    if final_edge not in blocked:
+        # direct return
+        walk.append((cur, start_node))
+    else:
+        # try one- or two-hop via any visited node
+        done = False
+        for mid in cw_between(cur, start_node) + cw_between(start_node, cur):
+            if mid in visited:
+                e1, e2 = _sorted_edge(cur, mid), _sorted_edge(mid, start_node)
+                if e1 not in blocked and e2 not in blocked:
+                    walk.extend([(cur, mid), (mid, start_node)])
+                    done = True
+                    break
+        # final fallback: direct via any visited
+        if not done:
+            for mid in visited:
+                e1, e2 = _sorted_edge(cur, mid), _sorted_edge(mid, start_node)
+                if e1 not in blocked and e2 not in blocked:
+                    walk.extend([(cur, mid), (mid, start_node)])
+                    break
+
+    return walk
+
+# ----------------------------------------------------------------------
+# Entry Point: cyclic_routing
+# ----------------------------------------------------------------------
+def cyclic_routing(
+    G: nx.Graph,
+    origin: Any,
+    blocked_edges: Iterable[Tuple[Any, Any]]
+) -> Tuple[List[Any], float]:
+    """
+    Compute a cyclic route using Christofides tour + CR algorithm.
+    """
+    blocked = {tuple(sorted(e)) for e in blocked_edges}
+    tour = get_christofides_tour(G, origin)
+    # tour = list(G.nodes)  # To test pdf example
+    walk = cr_algorithm(G, origin, tour, blocked)
+    route = [origin] + [v for _, v in walk]
+    length = sum(G[u][v]['weight'] for u, v in walk)
+    return route, length
+
 
 # ---------------------------------------------------------------------
 # __main__ guard for quick manual testing
 # ---------------------------------------------------------------------
 
 if __name__ == "__main__":  # pragma: no cover
-    import networkx as nx
     import random
 
     random.seed(0)
-    n = 12
+    n = 16
     G = nx.complete_graph(n)
     pos = {v: (random.random(), random.random()) for v in G}
     for u, v in G.edges:
         G[u][v]["weight"] = ((pos[u][0] - pos[v][0]) ** 2 + (pos[u][1] - pos[v][1]) ** 2) ** 0.5
 
-    blocked = {(0, 3), (2, 5), (1, 8), (7, 9), (4, 11)}
+    blocked = {(2,3),(2,4),(6,7),(8,9),(11,12),(11,13),(3,15),
+               (3,4),(7,9),(12,13),(4,13),(4,9),(9,12),(0,13)}
 
     r, L = cyclic_routing(G, origin=0, blocked_edges=blocked)
     print("Route:", r)
