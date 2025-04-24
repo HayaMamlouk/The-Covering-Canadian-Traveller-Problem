@@ -2,14 +2,14 @@
 
 > _Projet « Voyageur canadien couvrant » — M2 RP 2024‑2025_
 >
-> Binôme : **Haya MAMLOUK – Doruk OZGENC**\
+> Binôme : **Haya MAMLOUK – Doruk OZGENC**
 
 Ce dépôt contient l’**implantation complète** des deux algorithmes :
 
 - **CR — Cyclic Routing** (`cyclic_routing.py`)
 - **CNN — Christofides‑Nearest‑Neighbour** (`cnn_routing.py`)
 
-ainsi qu’un **harness** expérimental (`experiments.py`) et le rapport concernant le travail effectué.
+ainsi qu’un **harness** expérimental (`experiments.py`), un **notebook d’analyse** (`analysis.ipynb`) et le **rapport final**.
 
 ---
 
@@ -21,71 +21,67 @@ RP-OZGENC-MAMLOUK/
 ├── cyclic_routing.py          # Algorithme CR
 ├── cnn_routing.py             # Algorithme CNN
 ├── experiments.py             # Générateur et banc d’essai
-├── results.csv                # Resultâts numériques
+├── results.csv                # Résultats numériques expérimentaux
 ├── requirements.txt           # Dépendances Python minimales
 ├── README.md                  # <– ce fichier
-└── RP-OZGENC-MAMLOUK.pdf           # Rapport LaTeX final
+└── RP-OZGENC-MAMLOUK.pdf      # Rapport final au format PDF
 ```
 
-> Le script sera testé sous **Python ≥ 3.10**.
+> Le projet est conçu pour **Python ≥ 3.10**.
 
 ---
 
 ## 2 . Installation rapide
 
 ```bash
-# 1‑ Créez un environnement dédié (fortement recommandé)
+# 1‑ Créez un environnement dédié (recommandé)
 python -m venv .venv
 source .venv/bin/activate       # sous Windows : .venv\Scripts\activate
 
-# 2‑ Installez les bibliothèques minimales
-python -m pip install -r requirements.txt
+# 2‑ Installez les bibliothèques requises
+pip install -r requirements.txt
 ```
 
-`requirements.txt` contient :
+Contenu de `requirements.txt` :
 
 ```
 networkx>=3.0
-numpy     # utilisé indirectement
+numpy
 matplotlib
 pandas
-tqdm       # barre de progression dans experiments.py
+tqdm
 ```
 
-Aucune compilation supplémentaire n’est nécessaire.
+Aucune compilation nécessaire.
 
 ---
 
 ## 3 . Exécution des algorithmes seuls
 
-### 3.1 Cyclic Routing (CR)
+### 3.1 Cyclic Routing (CR)
 
 ```bash
 python cyclic_routing.py
 ```
 
-_Lance le petit auto‑test interne ; imprime le tour et sa longueur._
+_Lance un petit test sur un graphe complet ; imprime la tournée résultante._
 
-Pour l’utiliser dans votre propre code :
+Usage dans un code Python :
 
 ```python
-import networkx as nx
 from cyclic_routing import cyclic_routing
-
-G = nx.complete_graph(10)  # à vous de définir les poids
-blocked = {(0, 3), (2, 5)}      # arêtes définitivement bloquées
+G = ...  # graphe complet avec poids
+blocked = {(u, v)}
 route, length = cyclic_routing(G, origin=0, blocked_edges=blocked)
 ```
 
 ### 3.2 Christofides‑Nearest‑Neighbour (CNN)
 
-Même principe :
-
 ```bash
 python cnn_routing.py
 ```
 
-ou :
+Ou via Python :
 
 ```python
 from cnn_routing import cnn_routing
@@ -94,63 +90,74 @@ route, length = cnn_routing(G, origin=0, blocked_edges=blocked)
 
 ---
 
-## 4 . Lancer le banc d’essai complet
+## 4 . Lancer les expériences
 
-Le fichier `experiments.py` génère des graphes aléatoires, applique les deux algorithmes et enregistre les résultats **CSV** dans `results.csv`.
+`experiments.py` compare systématiquement CR et CNN sur diverses familles de graphes et différentes valeurs de _k_ (nombre d’arêtes bloquées).
 
-### 4.1 Options principales
+### 4.1 Familles d’instances testées
 
-| Option       | Valeur par défaut | Description                                                       |
-| ------------ | ----------------- | ----------------------------------------------------------------- |
-| `--families` | `B`               | Familles d’instances à tester (`A B C D E`)                       |
-| `--sizes`    | `20 40 80 160`    | Tailles _n_ des graphes                                           |
-| `--seeds`    | `30`              | Nombre de répétitions par (famille, n)                            |
-| `--kvals`    | _calculé_         | Valeurs de _k_ (arêtes bloquées) ; si absent → `{0,⌊√n⌋,⌊0.3 n⌋}` |
-| `--algos`    | `CR CNN`          | Algorithmes à évaluer                                             |
-| `--out`      | `results.csv`     | Fichier de sortie                                                 |
+- **A** : petits graphes fixes
+- **B** : points aléatoires uniformes
+- **C** : clusters gaussiens
+- **D** : grilles avec diagonales bon marché
+- **E** : instances adversariales sur la tournée de Christofides
 
-### 4.2 Exemples
-
-_Banc d’essai rapide pour la mise au point :_
+### 4.2 Exemple de commande complète
 
 ```bash
-python experiments.py --sizes 20 40 --seeds 5 --kvals 0 5
+python experiments.py \
+  --families A B C D E \
+  --sizes 20 40 80 160 \
+  --seeds 30 \
+  --algos CR CNN \
+  --timeout 30 \
+  --out results.csv
 ```
 
-_Jeu complet (≈ 20 min sur un laptop) :_
-
-```bash
-python experiments.py                    # toutes les valeurs par défaut
-```
-
-Une barre de progression `tqdm` indique l’avancement.
+Utilisez `tqdm` pour suivre la progression.
 
 ---
 
-## 5 . Génération des figures pour le rapport
+## 5 . Analyse et visualisation
 
-Un notebook `analysis.ipynb` lit `results.csv`, calcule le rapport de compétitivité, trace les boîtes à moustaches et génère les graphiques utilisés dans `RP-nom1-nom2.pdf`.
+Le fichier `analysis.ipynb` permet de générer tous les graphiques nécessaires pour comparer les performances des deux algorithmes selon :
+
+- **la famille de graphes**,
+- **le rapport de compétitivité**,
+- **le temps d’exécution**,
+- **la distribution des erreurs et cas extrêmes**,
+- **l’impact du nombre d’arêtes bloquées (k)**.
 
 ```bash
-jupyter lab
-# puis ouvrez analysis.ipynb
+jupyter lab  # puis ouvrir analysis.ipynb
 ```
 
 ---
 
-## 6 . FAQ & dépannage
+## 6 . Résultats et conclusions
 
-| Problème                                    | Solution                                                                                                          |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `ModuleNotFoundError: networkx`             | Oubliez l’étape d’installation → `pip install -r requirements.txt`                                                |
-| Le banc d’essai semble « bloqué »           | Utilisez `--sizes` plus petits ou `--seeds 5` pendant le débogage ; la barre `tqdm` montre la progression réelle. |
-| CR lève _RuntimeError: no reachable vertex_ | Vérifiez que le générateur d’instances conserve la connectivité après suppression des arêtes bloquées.            |
+- CR (**Cyclic Routing**) est globalement **plus compétitif** mais plus lent.
+- CNN (**Christofides-Nearest-Neighbor**) est **beaucoup plus rapide**, mais souvent un peu moins optimal.
+- Famille D (grille avec diagonales) est l’un des seuls cas où CNN obtient des résultats proches ou légèrement supérieurs à CR.
+- Famille E (adversariale) montre bien la robustesse de CR.
+
+Voir le **rapport complet** dans `RP-OZGENC-MAMLOUK.pdf`.
 
 ---
 
-## 7 . Licence
+## 7 . FAQ & dépannage
 
-Code publié sous licence **MIT**. Vous êtes libres de le réutiliser en citant l’origine.
+| Problème                                      | Solution                                                                                         |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `ModuleNotFoundError: networkx`               | Exécuter `pip install -r requirements.txt`                                                       |
+| Le benchmark semble figé                      | Utiliser `--sizes 20` et `--seeds 5` pour les tests rapides                                      |
+| Certains CR échouent ou durent trop longtemps | Un timeout est géré automatiquement avec `--timeout`, les cas sont marqués `TIMEOUT` dans le CSV |
+
+---
+
+## 8 . Licence
+
+Code publié sous licence **MIT** — libre de réutilisation et modification.
 
 ---
 
