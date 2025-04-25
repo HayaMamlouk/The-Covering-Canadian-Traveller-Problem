@@ -1,3 +1,6 @@
+# MAMLOUK Haya [21107689]
+# OZGENC Doruk [21113927]
+
 import networkx as nx
 from networkx.algorithms.approximation import traveling_salesman_problem
 from typing import Any, Iterable, List, Tuple

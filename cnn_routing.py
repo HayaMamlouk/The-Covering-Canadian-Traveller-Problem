@@ -1,5 +1,8 @@
+# MAMLOUK Haya [21107689]
+# OZGENC Doruk [21113927]
+
 from __future__ import annotations
-from itertools import tee
+from itertools import tee, combinations
 import networkx as nx
 from networkx.algorithms.approximation import traveling_salesman_problem
 from typing import Dict, List, Sequence, Set, Tuple
@@ -99,11 +102,16 @@ def _compress_phase(G_star, Us):
     E_prime = [(u, v) for u in Us for v in Us if u != v]
 
     # G' is the graphe with Us vertices and edges in E′.
-    G_prime = nx.MultiGraph()
+    G_prime = nx.Graph()
     G_prime.add_nodes_from(Us)
-    for u, v in E_prime:
-        w = G_star[u][v]["weight"] 
-        G_prime.add_edge(u, v, weight=w)
+    # for u, v in E_prime:
+    #     w = G_star[u][v]["weight"] 
+    #     G_prime.add_edge(u, v, weight=w)
+
+    for u, v in combinations(Us, 2):          # each pair once
+        if G_star.has_edge(u, v):
+            w = G_star[u][v]["weight"]
+            G_prime.add_edge(u, v, weight=w)     
 
     # H = (V, E\E')
     H = G_star.copy()

@@ -1,6 +1,9 @@
 #!/usr/bin/env python
-# experiments.py  – benchmark driver with robust per‑run time‑outs
+
+# MAMLOUK Haya [21107689]
+# OZGENC Doruk [21113927]
 # ------------------------------------------------------------------
+
 import argparse, csv, math, multiprocessing as mp, queue, random, time
 from typing import List, Set, Tuple
 
@@ -12,9 +15,11 @@ from cnn_routing import cnn_routing
 
 
 # ------------------------------------------------------------------
-#  Basic helpers (unchanged from previous version except comments)
+#  Basic helpers 
 # ------------------------------------------------------------------
 def complete_euclidean(pts):
+    """Build a complete graph with Euclidean distances."""
+    # pts = [(x, y), ...]
     G = nx.complete_graph(len(pts))
     for i, (x1, y1) in enumerate(pts):
         for j in range(i + 1, len(pts)):
@@ -23,14 +28,16 @@ def complete_euclidean(pts):
     return G
 
 
-def christofides_lb(G: nx.Graph, origin: int = 0) -> float:
-    from cnn_routing import _christofides_tour
+def christofides_lb(G, origin: int = 0):
+    """Compute the Christofides lower bound for G."""
+    from cnn_routing import get_christofides_tour
 
-    tour = _christofides_tour(G, origin)
+    tour = get_christofides_tour(G, origin)
     return sum(G[u][v]["weight"] for u, v in zip(tour, tour[1:] + [tour[0]]))
 
 
-def walk_length(G: nx.Graph, walk: List[int]) -> float:
+def walk_length(G, walk):
+    """Compute the length of a walk in G."""
     total, prev = 0.0, walk[0]
     for cur in walk[1:]:
         if cur != prev and G.has_edge(prev, cur):
@@ -39,9 +46,7 @@ def walk_length(G: nx.Graph, walk: List[int]) -> float:
     return total
 
 
-def sample_blocked_edges_connected(
-    G: nx.Graph, k: int, rnd: random.Random
-) -> Set[Tuple[int, int]]:
+def sample_blocked_edges_connected(G, k, rnd: random.Random) :
     """Choose k non‑bridge edges so that G \ blocked stays connected."""
     max_safe = G.number_of_edges() - (G.number_of_nodes() - 1)
     k = min(k, max_safe)
@@ -61,35 +66,17 @@ def sample_blocked_edges_connected(
 
 
 # ------------------------------------------------------------------
-#  Graph‑families
+#  Graph‑families (B, C, D, E, H)
 # ------------------------------------------------------------------
-_SMALL_GRAPHS = {
-    3: [(0, 0), (1, 0), (0.5, math.sqrt(3) / 2)],
-    4: [(0, 0), (1, 0), (1, 1), (0, 1)],
-    6: [(math.cos(t), math.sin(t)) for t in
-        [0, math.pi / 3, 2 * math.pi / 3, math.pi,
-         4 * math.pi / 3, 5 * math.pi / 3]],
-    8: [(math.cos(t), math.sin(t)) for t in
-        [i * math.pi / 4 for i in range(8)]],
-}
-
-
-def family_A(n: int, s: int):
-    """Toy graphs: small hard‑coded shapes, else a regular n‑gon."""
-    if n in _SMALL_GRAPHS:
-        pts = _SMALL_GRAPHS[n]
-    else:  # regular n‑gon fallback
-        pts = [(math.cos(2 * math.pi * i / n), math.sin(2 * math.pi * i / n))
-               for i in range(n)]
-    return complete_euclidean(pts)
-
-
 def family_B(n, s):
+    """Generate n random points in the unit square."""
     r = random.Random(s)
     return complete_euclidean([(r.random(), r.random()) for _ in range(n)])
 
+# --- CLUSTERS -----------------------------------------------------
 
 def _gaussian_clusters(n, s, k=4, sigma=0.03):
+    """Generate n points in k clusters, each with a Gaussian distribution."""
     r = random.Random(s)
     centres = [(r.random(), r.random()) for _ in range(k)]
     per = n // k
@@ -100,13 +87,14 @@ def _gaussian_clusters(n, s, k=4, sigma=0.03):
 
 
 def family_C(n, s):
+    """Generates compact clusters seperated by bridges."""
     return complete_euclidean(_gaussian_clusters(n, s))
 
+# --- GRID + DIAGONALS -----------------------------------------
 
 def _grid_with_highways(n, seed):
     """
-    Build an m*m grid with m = ceil(sqrt n); if m² > n keep only the first n
-    vertices (stable w.r.t. seed).  Make the two main diagonals 30 % cheaper.
+    Build an m*m grid. Make the two main diagonals 30 % cheaper.
     """
     m = math.ceil(math.sqrt(n))
     pts = [(i, j) for i in range(m) for j in range(m)]
@@ -126,21 +114,39 @@ def _grid_with_highways(n, seed):
 def family_D(n, s):
     return _grid_with_highways(n, s)
 
+# --- ADVERSARIAL CHRISTOFIDES ------------------------------------
 
 def family_E(n, s):
+    """Blocks around 80 % of the edges in a Christofides tour."""
     G = family_B(n, s)
-    from cnn_routing import _christofides_tour
+    from cnn_routing import get_christofides_tour
 
-    tour = _christofides_tour(G, 0)
+    tour = get_christofides_tour(G, 0)
     k_adv = int(math.ceil(0.8 * n))
     start = s % n
     blocked = {tuple(sorted((tour[(start + i) % n], tour[(start + i + 1) % n])))
                for i in range(k_adv)}
     return G, blocked
 
+# --- HUB‑AND‑SPOKE / STAR --------------------------------------
 
-FAMILIES = {"A": family_A, "B": family_B, "C": family_C,
-            "D": family_D, "E": family_E}
+def family_H(n: int, s: int) -> nx.Graph:
+    """Star metric : node 0 is the hub (cost 1), all others are leaves (leaf-leaf = 1)."""
+    if n < 3:
+        raise ValueError("Hub‑and‑spoke needs n ≥ 3")
+
+    G = nx.complete_graph(n)
+    for i in range(1, n):
+        G[0][i]["weight"] = 1.0  # branches
+    for i in range(1, n):
+        for j in range(i + 1, n):
+            G[i][j]["weight"] = 2.0  # direct leaf‑to‑leaf (equals detour via hub)
+    return G  
+
+#---------------------------------------------------------------------  
+
+FAMILIES = {"B": family_B, "C": family_C,
+            "D": family_D, "E": family_E, "H": family_H}
 
 # ------------------------------------------------------------------
 #  Timeout‑safe wrapper for CR
@@ -153,10 +159,7 @@ def _cr_worker(G, blocked, q):
         q.put(("ERROR", str(exc)))
 
 
-def safe_route(algo: str,
-               G: nx.Graph,
-               blocked,
-               timeout: int):
+def safe_route(algo: str, G, blocked,timeout: int):
     """Run <algo>; kill it after *timeout* s if needed."""
     if algo == "CNN":                 # fast – run in‑process
         t0 = time.perf_counter()
@@ -192,8 +195,15 @@ def safe_route(algo: str,
 # ------------------------------------------------------------------
 #  Main benchmark loop
 # ------------------------------------------------------------------
-def default_k_vals(n: int):
-    return [0, int(n ** 0.5), int(0.2 * n)]
+# def default_k_vals(n: int):
+#     return [0, int(n ** 0.5), int(0.2 * n)]
+
+def default_k_vals(n):
+    return [0,
+            1,
+            int(0.05*n),
+            int(0.1*n),
+            int(0.2*n)]
 
 
 def main():

@@ -1,6 +1,6 @@
 # RP — Algorithmes CR & CNN
 
-> _Projet « Voyageur canadien couvrant » — M2 RP 2024‑2025_
+> _Projet « Voyageur canadien couvrant » — M1 RP 2024‑2025_
 >
 > Binôme : **Haya MAMLOUK – Doruk OZGENC**
 
@@ -96,17 +96,17 @@ route, length = cnn_routing(G, origin=0, blocked_edges=blocked)
 
 ### 4.1 Familles d’instances testées
 
-- **A** : petits graphes fixes
 - **B** : points aléatoires uniformes
 - **C** : clusters gaussiens
 - **D** : grilles avec diagonales bon marché
 - **E** : instances adversariales sur la tournée de Christofides
+- **H** : Hub‑and‑spoke / étoile
 
 ### 4.2 Exemple de commande complète
 
 ```bash
-python experiments.py \
-  --families A B C D E \
+python3 experiments.py \
+  --families B C D E H\
   --sizes 20 40 80 160 \
   --seeds 30 \
   --algos CR CNN \
@@ -136,30 +136,16 @@ jupyter lab  # puis ouvrir analysis.ipynb
 
 ## 6 . Résultats et conclusions
 
-- CR (**Cyclic Routing**) est globalement **plus compétitif** mais plus lent.
-- CNN (**Christofides-Nearest-Neighbor**) est **beaucoup plus rapide**, mais souvent un peu moins optimal.
-- Famille D (grille avec diagonales) est l’un des seuls cas où CNN obtient des résultats proches ou légèrement supérieurs à CR.
-- Famille E (adversariale) montre bien la robustesse de CR.
-
 Voir le **rapport complet** dans `RP-OZGENC-MAMLOUK.pdf`.
 
 ---
 
 ## 7 . FAQ & dépannage
 
-| Problème                                      | Solution                                                                                         |
+| Problème                                      |                                                                                      |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | `ModuleNotFoundError: networkx`               | Exécuter `pip install -r requirements.txt`                                                       |
 | Le benchmark semble figé                      | Utiliser `--sizes 20` et `--seeds 5` pour les tests rapides                                      |
 | Certains CR échouent ou durent trop longtemps | Un timeout est géré automatiquement avec `--timeout`, les cas sont marqués `TIMEOUT` dans le CSV |
 
----
 
-## 8 . Licence
-
-Code publié sous licence **MIT** — libre de réutilisation et modification.
-
----
-
-> © 2025 Doruk OZGENC & Haya MAMLOUK — Sorbonne Université\
-> Master AI2D — Résolution de Problèmes
