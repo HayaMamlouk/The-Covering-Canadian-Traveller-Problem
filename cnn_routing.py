@@ -1,141 +1,67 @@
-# cnn_routing.py
-# ------------------------------------------------------------
-# Implementation of the *Christofides' Nearest‑Neighbor* (CNN)
-# algorithm described in the user‑supplied pseudocode.
-# ------------------------------------------------------------
-# Author: ChatGPT (OpenAI o3)
-# ------------------------------------------------------------
-"""
-CNN *compress‑and‑explore* algorithm
-===================================
-
-The algorithm consists of two phases:
-
-1. **Short‑Cut phase** – follow the 1.5‑approximate Christofides TSP tour as
-   far as possible, *skipping* vertices whose incident edge is discovered
-   blocked.  Every time the traveller is at a vertex, it learns the status of
-   all incident edges.  Blocked edges are collected into :math:`E_b`.
-   The walk produced in this phase is ``P1``;  the set of still‑unvisited
-   vertices *plus* the origin is :math:`U_s`.
-
-2. **Compression & Exploration phase** – build a *compressed* auxiliary graph
-   :math:`G'` consisting only of the vertices in :math:`U_s` and, for each pair
-   `(x, y)`, an edge whose weight equals the length of the *shortest path* in
-   the partially known graph (all blocked edges removed) that connects `x` and
-   `y` using only *known‑to‑exist* edges.  Run the classic *Nearest‑Neighbor*
-   greedy exploration algorithm on :math:`G'` (second walk ``P2``) and finally
-   **expand** every compressed edge back into its real path.
-
-The final tour is ``P = P1  ∘  P2``.
-
---------------------------------------------------------------------------
-API
---------------------------------------------------------------------------
-
-``cnn_routing(G, origin, blocked_edges)`` → ``(route, length)``
-
-* ``route``  – list of vertices starting and ending at ``origin``.
-* ``length`` – total metric length according to edge weights in ``G``.
-
-The code requires **networkx ≥ 2.8**.  It automatically handles both the older
-and newer calling conventions of ``christofides`` inside NetworkX ≥ 3.2.
-"""
 from __future__ import annotations
-
-import heapq
 from itertools import tee
+import networkx as nx
+from networkx.algorithms.approximation import traveling_salesman_problem
 from typing import Dict, List, Sequence, Set, Tuple
 
-import networkx as nx
-
 # ---------------------------------------------------------------------
-# Utilities – reused from cyclic_routing.py (kept self‑contained here)
+# Utilities 
 # ---------------------------------------------------------------------
-
-def _edge_key(u, v):
-    """Return a canonical undirected 2‑tuple suitable for set/dict keys."""
-    return (u, v) if u <= v else (v, u)
-
+def _sorted_edge(u, v) :
+    """Return a sorted tuple of the edge (u, v) to ensure undirectedness."""
+    return tuple(sorted((u, v)))
 
 def _pairwise(it):
     """s -> (s0,s1), (s1,s2), …"""
     a, b = tee(it)
     next(b, None)
     return zip(a, b)
+# ----------------------------------------------------------------------
+# Christofides Tour (approximation for TSP)
+# ----------------------------------------------------------------------
+def get_christofides_tour(G, start_node):
+    """
+    Compute a Christofides TSP tour on G, rotate to start at `start_node`,
+    and drop the final return to that node to get a simple cycle ordering.
+    """
+    cycle = traveling_salesman_problem(G, cycle=True, weight='weight')
+    if start_node in cycle:
+        idx = cycle.index(start_node)
+        cycle = cycle[idx:] + cycle[:idx]
+    return cycle[:-1]  # remove duplicated endpoint
 
 # ---------------------------------------------------------------------
-# Christofides 1.5‑approximation tour (same patch as in cyclic_routing.py)
+# 1. Short‑Cut phase
 # ---------------------------------------------------------------------
 
-def _greedy_fallback(G: nx.Graph, origin: int) -> List[int]:
-    """Very small fallback if christofides() unavailable."""
-    unvisited = set(G.nodes())
-    unvisited.remove(origin)
-    tour = [origin]
-    cur = origin
-    while unvisited:
-        nxt = min(unvisited, key=lambda v: G[cur][v]["weight"])
-        tour.append(nxt)
-        unvisited.remove(nxt)
-        cur = nxt
-    return tour
-
-
-def _christofides_tour(G: nx.Graph, origin: int) -> List[int]:
-    """Fast Christofides wrapper (avoids heavy all‑pairs Dijkstra call)."""
-
-    if not hasattr(nx.algorithms.approximation, "christofides"):
-        return _greedy_fallback(G, origin)
-
-    try:
-        tour = nx.algorithms.approximation.christofides(G, weight="weight")
-    except TypeError:
-        tour = nx.algorithms.approximation.christofides(G)
-
-    if tour[0] != origin:
-        k = tour.index(origin)
-        tour = tour[k:] + tour[:k]
-    tour = tour[:-1]
-    return tour
-
-# ---------------------------------------------------------------------
-# 1. Short‑Cut phase (lines 1‑20 of the pseudocode)                    |
-# ---------------------------------------------------------------------
-
-def _shortcut_phase(
-    G: nx.Graph,
-    P: Sequence[int],
-    blocked_edges: Set[Tuple[int, int]],
-):
+def _shortcut_phase(G, P, blocked_edges):
     """Perform the ShortCut procedure.
-
     Returns
     -------
-    G_star : nx.Graph  – graph with *all discovered blocked edges removed*.
+    G_star : nx.Graph  – graph with all discovered blocked edges removed*.
     Us      : set      – unvisited vertices *plus* the origin.
     P1      : list     – realised walk of the traveller in this phase.
     """
-    n = len(P)
-    V = set(G.nodes())
-    s = P[0]
+    n = len(P)           # number of vertices in the tour
+    V = set(G.nodes())   # all vertices in the graph
+    s = P[0]             # starting vertex (origin)
 
-    i, j = 0, 1  # indices in *P*
-    Us = {s}
-    Eb: Set[Tuple[int, int]] = set()
-    P_prime: List[int] = [s]
+    i, j = 0, 1  # indices of the current and next vertex in the tour
+    Us = {s}     # unvisited vertices (initially only the origin)
+    Eb: Set[Tuple[int, int]] = set() # discovered blocked edges
+    P_prime: List[int] = [s]         # realised walk of the traveller
 
     def is_blocked(u, v):
-        return _edge_key(u, v) in blocked_edges
+        return _sorted_edge(u, v) in blocked_edges
 
     while j < n:
-        v_i, v_j = P[i], P[j]
+        v_i, v_j = P[i], P[j]  # current and next vertex in the tour
 
-        # (5) add newly discovered blocked edges adjacent to v_i
+        #  newly discovered blocked edges adjacent to v_i
         for x in V - {v_i}:
             if is_blocked(v_i, x):
-                Eb.add(_edge_key(v_i, x))
+                Eb.add(_sorted_edge(v_i, x))
 
-        # (6‑11)
         if not is_blocked(v_i, v_j):
             P_prime.append(v_j)
             i = j  # advance – we really moved to v_j
@@ -147,11 +73,9 @@ def _shortcut_phase(
     # After the loop, we are still at P[i]. Try to return to s.
     v_i = P[i]
     if is_blocked(v_i, s):
-        # (15‑16) return following P' backwards
         backtrack = list(reversed(P_prime[:-1]))  # skip current v_i duplicate
         P_prime.extend(backtrack)
     else:
-        # (18) directly append s
         P_prime.append(s)
 
     # Build G* (blocked edges removed)
@@ -163,43 +87,48 @@ def _shortcut_phase(
     return G_star, Us, P_prime
 
 # ---------------------------------------------------------------------
-# 2. Compression phase (Function Compress)                             |
+# 2. Compression phase (Function Compress)    
 # ---------------------------------------------------------------------
-
-def _compress_phase(
-    G_star: nx.Graph,
-    Us: Set[int],
-):
-    """Return the compressed multigraph G' and a path‑lookup table.
+def _compress_phase(G_star, Us):
+    """Return the compressed multigraph G' and a path lookup table.
 
     The lookup maps an **unordered** pair {u, v} (as a frozenset) to the actual
     shortest path (list of vertices) inside *G_star*.
     """
-    G_prime = nx.Graph()
+    #E′ is the subset of edges with unknown state, i.e., of {x,y} with x,y∈Us.
+    E_prime = [(u, v) for u in Us for v in Us if u != v]
+
+    # G' is the graphe with Us vertices and edges in E′.
+    G_prime = nx.MultiGraph()
     G_prime.add_nodes_from(Us)
+    for u, v in E_prime:
+        w = G_star[u][v]["weight"] 
+        G_prime.add_edge(u, v, weight=w)
+
+    # H = (V, E\E')
+    H = G_star.copy()
+    H.remove_edges_from(E_prime)
 
     path_lookup: Dict[frozenset[int], List[int]] = {}
-
-    # Pre‑compute all‑pairs shortest paths only between Us vertices.
+    
     Us_list = list(Us)
-    for i in range(len(Us_list)):
-        for j in range(i + 1, len(Us_list)):
-            u, v = Us_list[i], Us_list[j]
-            try:
-                length, path = nx.single_source_dijkstra(G_star, u, v, weight="weight")
-            except nx.NetworkXNoPath:
-                continue  # keep graph disconnected; exploration will handle
+
+    for i, u in enumerate(Us_list):
+        for v in Us_list[i + 1:]:
+            # Compute the shortest path between u and v in H
+            path = nx.shortest_path(H, source=u, target=v, weight="weight")
+            length = sum(G_star[u][v]["weight"] for u, v in _pairwise(path))
+            # Add the path to G'
             G_prime.add_edge(u, v, weight=length)
             path_lookup[frozenset((u, v))] = path
-
     return G_prime, path_lookup
-
+            
 # ---------------------------------------------------------------------
-# 3. Nearest‑Neighbor exploration on G'                                |
+# 3. Nearest‑Neighbor exploration on G'     
 # ---------------------------------------------------------------------
 
-def _nearest_neighbor_tour(G: nx.Graph, origin: int) -> List[int]:
-    """Return an NN tour *starting and ending* at ``origin``."""
+def _nearest_neighbor_tour(G, origin):
+    """Return an NN tour starting and ending at origin."""
     unvisited = set(G.nodes())
     unvisited.remove(origin)
     tour = [origin]
@@ -213,10 +142,7 @@ def _nearest_neighbor_tour(G: nx.Graph, origin: int) -> List[int]:
     return tour
 
 
-def _expand_compressed_tour(
-    compressed_tour: Sequence[int],
-    path_lookup: Dict[frozenset[int], List[int]],
-):
+def _expand_compressed_tour(compressed_tour, path_lookup):
     """Expand every compressed edge into its real path inside the original graph."""
     expanded: List[int] = [compressed_tour[0]]
     for u, v in _pairwise(compressed_tour):
@@ -229,20 +155,16 @@ def _expand_compressed_tour(
     return expanded
 
 # ---------------------------------------------------------------------
-# 4. Public wrapper – CNN routing                                      |
+# 4. CNN routing                                      
 # ---------------------------------------------------------------------
 
-def cnn_routing(
-    G: nx.Graph,
-    origin: int,
-    blocked_edges: Set[Tuple[int, int]] | List[Tuple[int, int]] = (),
-):
-    """Run the *Christofides' Nearest‑Neighbor* algorithm.
+def cnn_routing(G, origin, blocked_edges):
+    """Run the Christofides Nearest Neighbor algorithm.
 
     Parameters
     ----------
-    G : ``networkx.Graph`` – **complete** metric graph (triangle inequality).
-    origin : starting vertex ``s``.
+    G : networkx.Graph – complete metric graph (triangle inequality).
+    origin : starting vertex s.
     blocked_edges : collection of unordered vertex pairs that are permanently
                     blocked (concealed from the algorithm until first probe).
 
@@ -252,10 +174,10 @@ def cnn_routing(
     length – total distance travelled.
     """
     # Normalise blocked‑edge set
-    blocked_edges = {_edge_key(u, v) for (u, v) in blocked_edges if u != v}
+    blocked_edges = {_sorted_edge(u, v) for (u, v) in blocked_edges if u != v}
 
     # 1. Christofides tour
-    P = _christofides_tour(G, origin)
+    P = get_christofides_tour(G, origin)
 
     # 2. Short‑Cut phase
     G_star, Us, P1 = _shortcut_phase(G, P, blocked_edges)
@@ -267,23 +189,17 @@ def cnn_routing(
     P2_compressed = _nearest_neighbor_tour(G_prime, origin)
     P2 = _expand_compressed_tour(P2_compressed, path_lookup)
 
-    # 5. Concatenate paths (skip duplicate origin in the middle)
-    final_route = P1 + P2[1:]
+    # 5. Concatenate paths (skip duplicate origin in the middle and end)
+    final_route = P1[:-1] + P2[1:]
 
-    # 6. Total length (skip consecutive duplicates, use *G* as metric authority)
+    # 6. Total length (skip consecutive duplicates, use G as metric authority)
     total_len = 0.0
     prev = final_route[0]
     for cur in final_route[1:]:
         if cur == prev:
             continue  # ignore 0‑length self‑loops that may appear after expansion
-        try:
-            total_len += G[prev][cur]["weight"]
-        except KeyError as err:
-            raise KeyError(
-                f"Edge ({prev}, {cur}) not present in the original graph. "
-                "Ensure the input G is complete (metric) or amend the code to "
-                "compute path lengths via shortest‑path instead."
-            ) from err
+        
+        total_len += G[prev][cur]["weight"]
         prev = cur
 
     return final_route, total_len

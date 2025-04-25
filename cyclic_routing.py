@@ -2,10 +2,56 @@ import networkx as nx
 from networkx.algorithms.approximation import traveling_salesman_problem
 from typing import Any, Iterable, List, Tuple
 
+# ---------------------------------------------------------------------
+# Utilities                                                           
+# ---------------------------------------------------------------------
+def _sorted_edge(u, v) :
+    """Return a sorted tuple of the edge (u, v) to ensure undirectedness."""
+    return tuple(sorted((u, v)))
+
+def cw_between(a , b, tour):
+    """Return nodes encountered moving CW from `a` to `b` (exclusive)."""
+    res = []
+    n = len(tour)
+    i = (tour.index(a) + 1) % n
+    # collect until we reach b
+    while tour[i] != b:
+        res.append(tour[i])
+        i = (i + 1) % n
+    return res
+
+def agenda_list(cur, direction, unvisited, tour):
+    """
+    Create the list of unvisited nodes encountered by making one full lap
+    around the `tour`, starting immediately after `cur`, in the given
+    `direction` (1=CW, -1=CCW).
+
+    Returns:
+        List of nodes (subset of unvisited) in the order they appear.
+    """
+    # choose traversal order
+    order = tour if direction == 1 else list(reversed(tour))
+    seq: List[Any] = []
+    n = len(order)
+    # start just after current node
+    start_idx = order.index(cur)
+    idx = (start_idx + 1) % n
+    first = order[idx]
+    # walk exactly one lap
+    while True:
+        node = order[idx]
+        # include if not visited yet
+        if node in unvisited:
+            seq.append(node)
+        idx = (idx + 1) % n
+        if order[idx] == first:
+            break
+    return seq
+
 # ----------------------------------------------------------------------
 # Christofides Tour (approximation for TSP)
 # ----------------------------------------------------------------------
-def get_christofides_tour(G: nx.Graph, start_node: Any):
+def get_christofides_tour(G, start_node):
     """
     Compute a Christofides TSP tour on G, rotate to start at `start_node`,
     and drop the final return to that node to get a simple cycle ordering.
@@ -19,60 +65,12 @@ def get_christofides_tour(G: nx.Graph, start_node: Any):
 # ----------------------------------------------------------------------
 # Core CR Algorithm
 # ----------------------------------------------------------------------
-def cr_algorithm(G: nx.Graph, start_node, tour: List[Any],blocked: set[Tuple[Any, Any]]) -> List[Tuple[Any, Any]]:
+def cr_algorithm(G, start_node, tour, blocked) -> List[Tuple[Any, Any]]:
     """
     Perform the Cyclic-Routing (CR) traversal on G using a fixed circular
     `tour` and avoiding edges in `blocked`. Returns the sequence of directed
     edges (u, v) that form the walk, finishing back at `start_node`.
     """
-
-    def _sorted_edge(u: Any, v: Any) -> Tuple[Any, Any]: 
-        """Return a sorted tuple of the edge (u, v) to ensure undirectedness."""
-        return tuple(sorted((u, v)))
-    
-    def cw_between(a: Any, b: Any) -> List[Any]:
-        """Return nodes encountered moving CW from `a` to `b` (exclusive)."""
-        res = []
-        n = len(tour)
-        i = (tour.index(a) + 1) % n
-        # collect until we reach b
-        while tour[i] != b:
-            res.append(tour[i])
-            i = (i + 1) % n
-        return res
-
-    def agenda_list(
-        cur: Any,
-        direction: int,
-        unvisited: set
-    ) -> List[Any]:
-        """
-        Create the list of unvisited nodes encountered by making one full lap
-        around the `tour`, starting immediately after `cur`, in the given
-        `direction` (1=CW, -1=CCW).
-
-        Returns:
-            List of nodes (subset of unvisited) in the order they appear.
-        """
-        # choose traversal order
-        order = tour if direction == 1 else list(reversed(tour))
-        seq: List[Any] = []
-        n = len(order)
-        # start just after current node
-        start_idx = order.index(cur)
-        idx = (start_idx + 1) % n
-        first = order[idx]
-        # walk exactly one lap
-        while True:
-            node = order[idx]
-            # include if not visited yet
-            if node in unvisited:
-                seq.append(node)
-            idx = (idx + 1) % n
-            if order[idx] == first:
-                break
-        return seq
-
     # --- Initialization ---
     visited = {start_node}             # nodes we've reached
     unvisited = set(G.nodes) - visited # nodes still to reach
@@ -84,7 +82,7 @@ def cr_algorithm(G: nx.Graph, start_node, tour: List[Any],blocked: set[Tuple[Any
     # --- Main CR loop: visit all nodes ---
     while unvisited :
         # plan next candidates
-        todo = agenda_list(cur, direction, unvisited)
+        todo = agenda_list(cur, direction, unvisited, tour)
         if not todo:
             # no unvisited nodes reachable 
             break
@@ -108,8 +106,8 @@ def cr_algorithm(G: nx.Graph, start_node, tour: List[Any],blocked: set[Tuple[Any
             # --- Case 2: direct edge blocked ---
             # mark blocked and attempt a two-hop detour via visited nodes
             blocked.add(edge)
-            arc = (cw_between(cur, tgt) if direction == 1
-                   else list(reversed(cw_between(tgt, cur))))
+            arc = (cw_between(cur, tgt, tour) if direction == 1
+                   else list(reversed(cw_between(tgt, cur, tour))))
             for mid in arc:
                 if mid in visited:
                     e1, e2 = _sorted_edge(cur, mid), _sorted_edge(mid, tgt)
@@ -144,7 +142,7 @@ def cr_algorithm(G: nx.Graph, start_node, tour: List[Any],blocked: set[Tuple[Any
     else:
         # try one- or two-hop via any visited node
         done = False
-        for mid in cw_between(cur, start_node) + cw_between(start_node, cur):
+        for mid in cw_between(cur, start_node, tour) + cw_between(start_node, cur, tour):
             if mid in visited:
                 e1, e2 = _sorted_edge(cur, mid), _sorted_edge(mid, start_node)
                 if e1 not in blocked and e2 not in blocked:
