@@ -3,7 +3,6 @@
 
 import networkx as nx
 from networkx.algorithms.approximation import traveling_salesman_problem
-from typing import Any, Iterable, List, Tuple
 
 # ---------------------------------------------------------------------
 # Utilities                                                           
@@ -26,15 +25,15 @@ def cw_between(a , b, tour):
 def agenda_list(cur, direction, unvisited, tour):
     """
     Create the list of unvisited nodes encountered by making one full lap
-    around the `tour`, starting immediately after `cur`, in the given
-    `direction` (1=CW, -1=CCW).
+    around the tour, starting immediately after cur, in the given
+    direction (1=CW, -1=CCW).
 
     Returns:
         List of nodes (subset of unvisited) in the order they appear.
     """
     # choose traversal order
     order = tour if direction == 1 else list(reversed(tour))
-    seq: List[Any] = []
+    seq = []
     n = len(order)
     # start just after current node
     start_idx = order.index(cur)
@@ -56,7 +55,7 @@ def agenda_list(cur, direction, unvisited, tour):
 # ----------------------------------------------------------------------
 def get_christofides_tour(G, start_node):
     """
-    Compute a Christofides TSP tour on G, rotate to start at `start_node`,
+    Compute a Christofides TSP tour on G, rotate to start at start_node,
     and drop the final return to that node to get a simple cycle ordering.
     """
     cycle = traveling_salesman_problem(G, cycle=True, weight='weight')
@@ -68,18 +67,18 @@ def get_christofides_tour(G, start_node):
 # ----------------------------------------------------------------------
 # Core CR Algorithm
 # ----------------------------------------------------------------------
-def cr_algorithm(G, start_node, tour, blocked) -> List[Tuple[Any, Any]]:
+def cr_algorithm(G, start_node, tour, blocked) :
     """
     Perform the Cyclic-Routing (CR) traversal on G using a fixed circular
-    `tour` and avoiding edges in `blocked`. Returns the sequence of directed
-    edges (u, v) that form the walk, finishing back at `start_node`.
+    tour and avoiding edges in blocked. Returns the list of directed
+    edges (u, v) that form the walk, finishing back at start_node.
     """
     # --- Initialization ---
     visited = {start_node}             # nodes we've reached
     unvisited = set(G.nodes) - visited # nodes still to reach
     cur = start_node                   # current node
     direction = 1                      # traversal direction: 1=CW, -1=CCW
-    walk: List[Tuple[Any, Any]] = []   # edges of the CR walk
+    walk = []   # edges of the CR walk
     round_no = 1                       # iteration counter
 
     # --- Main CR loop: visit all nodes ---
@@ -165,11 +164,7 @@ def cr_algorithm(G, start_node, tour, blocked) -> List[Tuple[Any, Any]]:
 # ----------------------------------------------------------------------
 # Entry Point: cyclic_routing
 # ----------------------------------------------------------------------
-def cyclic_routing(
-    G: nx.Graph,
-    origin: Any,
-    blocked_edges: Iterable[Tuple[Any, Any]]
-) -> Tuple[List[Any], float]:
+def cyclic_routing(G, origin, blocked_edges) :
     """
     Compute a cyclic route using Christofides tour + CR algorithm.
     """

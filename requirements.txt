@@ -1,5 +1,5 @@
 networkx>=3.0
-numpy     # utilisé indirectement
+numpy     
 matplotlib
 pandas
-tqdm       # barre de progression dans experiments.py
+tqdm       

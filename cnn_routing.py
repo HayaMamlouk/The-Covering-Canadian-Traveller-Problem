@@ -5,7 +5,7 @@ from __future__ import annotations
 from itertools import tee, combinations
 import networkx as nx
 from networkx.algorithms.approximation import traveling_salesman_problem
-from typing import Dict, List, Sequence, Set, Tuple
+from typing import Dict, List
 
 # ---------------------------------------------------------------------
 # Utilities 
@@ -24,7 +24,7 @@ def _pairwise(it):
 # ----------------------------------------------------------------------
 def get_christofides_tour(G, start_node):
     """
-    Compute a Christofides TSP tour on G, rotate to start at `start_node`,
+    Compute a Christofides TSP tour on G, rotate to start at start_node,
     and drop the final return to that node to get a simple cycle ordering.
     """
     cycle = traveling_salesman_problem(G, cycle=True, weight='weight')
@@ -41,9 +41,9 @@ def _shortcut_phase(G, P, blocked_edges):
     """Perform the ShortCut procedure.
     Returns
     -------
-    G_star : nx.Graph  – graph with all discovered blocked edges removed*.
-    Us      : set      – unvisited vertices *plus* the origin.
-    P1      : list     – realised walk of the traveller in this phase.
+    G_star : nx.Graph  - graph with all discovered blocked edges removed*.
+    Us      : set      - unvisited vertices plus the origin.
+    P1      : list     - realised walk of the traveller in this phase.
     """
     n = len(P)           # number of vertices in the tour
     V = set(G.nodes())   # all vertices in the graph
@@ -51,8 +51,8 @@ def _shortcut_phase(G, P, blocked_edges):
 
     i, j = 0, 1  # indices of the current and next vertex in the tour
     Us = {s}     # unvisited vertices (initially only the origin)
-    Eb: Set[Tuple[int, int]] = set() # discovered blocked edges
-    P_prime: List[int] = [s]         # realised walk of the traveller
+    Eb = set() # discovered blocked edges
+    P_prime = [s]         # realised walk of the traveller
 
     def is_blocked(u, v):
         return _sorted_edge(u, v) in blocked_edges
@@ -95,8 +95,8 @@ def _shortcut_phase(G, P, blocked_edges):
 def _compress_phase(G_star, Us):
     """Return the compressed multigraph G' and a path lookup table.
 
-    The lookup maps an **unordered** pair {u, v} (as a frozenset) to the actual
-    shortest path (list of vertices) inside *G_star*.
+    The lookup maps an unordered pair {u,v} (as a frozenset) to the actual
+    shortest path (list of vertices) inside G_star.
     """
     #E′ is the subset of edges with unknown state, i.e., of {x,y} with x,y∈Us.
     E_prime = [(u, v) for u in Us for v in Us if u != v]
@@ -152,7 +152,7 @@ def _nearest_neighbor_tour(G, origin):
 
 def _expand_compressed_tour(compressed_tour, path_lookup):
     """Expand every compressed edge into its real path inside the original graph."""
-    expanded: List[int] = [compressed_tour[0]]
+    expanded = [compressed_tour[0]]
     for u, v in _pairwise(compressed_tour):
         key = frozenset((u, v))
         real_path = path_lookup.get(key, [u, v])  # fallback to direct edge
@@ -171,15 +171,15 @@ def cnn_routing(G, origin, blocked_edges):
 
     Parameters
     ----------
-    G : networkx.Graph – complete metric graph (triangle inequality).
+    G : networkx.Graph - complete metric graph (triangle inequality).
     origin : starting vertex s.
     blocked_edges : collection of unordered vertex pairs that are permanently
                     blocked (concealed from the algorithm until first probe).
 
     Returns
     -------
-    route  – list of vertices (walk) starting and ending at *origin*.
-    length – total distance travelled.
+    route  - list of vertices (walk) starting and ending at *origin*.
+    length - total distance travelled.
     """
     # Normalise blocked‑edge set
     blocked_edges = {_sorted_edge(u, v) for (u, v) in blocked_edges if u != v}

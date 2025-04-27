@@ -1,11 +1,9 @@
-#!/usr/bin/env python
-
 # MAMLOUK Haya [21107689]
 # OZGENC Doruk [21113927]
 # ------------------------------------------------------------------
 
 import argparse, csv, math, multiprocessing as mp, queue, random, time
-from typing import List, Set, Tuple
+from typing import List 
 
 import networkx as nx
 from tqdm import tqdm
